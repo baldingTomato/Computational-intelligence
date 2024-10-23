@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 def classify_iris(sl, sw, pl, pw):
-    if sl > 4:
+    if pl < 2:
         return("Setosa")
-    elif pl <= 5:
+    elif pl >= 5:
         return("Virginica")
     else:
         return("Versicolor")
@@ -24,25 +24,6 @@ def main():
             good_predictions = good_predictions + 1
     print(good_predictions)
     print(good_predictions / len * 100, "%")
-
-    #print("Liczba próbek: ", test_set.shape[0])
-
-    #train_inputs = train_set[:, 0:4]
-    #train_classes = train_set[:, 4]
-    #test_inputs = test_set[:, 0:4]
-    #test_classes = test_set[:, 4]
-
-    #print("Dane treningowe:\n")
-    #print(train_inputs)
-
-    #print("Gatunki treningowe:\n")
-    #print(train_classes)
-
-    #print("Dane testowe:\n")
-    #print(test_inputs)
-
-    #print("Gatunki testowe:\n")
-    #print(test_classes)
 
 
 if __name__ == "__main__":
