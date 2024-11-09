@@ -34,7 +34,10 @@ model = Sequential([
     Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
     Dense(64, activation='relu'),
     Dense(y_encoded.shape[1], activation='softmax')
-])
+])                                                         # c) Model ma 4 warstwy: wejściową, dwie ukryte warstwy z 64 neuronami każda i warstwę wyjściową. Ile 
+                                                           # neuronów ma warstwa wejściowa i co oznacza X_train.shape[1]? Ile neuronów ma warstwa wyjściowa i co oznacza y_encoded.shape[1]? ->
+                                                           #        Warstwa wejściowa ma tyle neuronów, ile jest kategorii danych (X_train.shape[1]), w naszym przypadku 4. Wyjściowa ma 3 neurony, bo mamy 3 gatunki (y_encoded.shape[1])
+
 
 # Compile the model
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
