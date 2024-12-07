@@ -35,6 +35,33 @@ def deStutter[A](seq: Seq[A]): Seq[A] = {
 
 acc :+ x -> do Seq acc dokleja na koniec x
 
+def group[A, B, C](l: List[A])(f: A => B)(op: A => C)(op2: (A, C) => C): Set[(B, C)] = {
+  @tailrec
+  def group_rec(l: List[A], h_l: Set[B] = Set(), acc: Set[(B, C)] = Set()): Set[(B, C)] = l match{
+    case Nil => acc
+    case head :: tail => {
+      (h_l + f(head)).size > h_l.size match {
+        case true => return group_rec(tail, h_l + f(head), acc + helper(tail, f(head), (f(head), op(head))))
+        case false => return group_rec(tail, h_l, acc)
+      }
+    }
+  }
+  def helper(l: List[A], m: B, acc: (B, C)): (B, C) = l match {
+    case Nil => acc
+    case head :: tail => {
+      f(head) == m match {
+        case true => {
+          acc match {
+            case (a, b) => helper(tail, m, (m, op2(head, b)))
+          }
+        } 
+        case false => helper(tail, m, acc)
+      }
+    }
+  }
+  group_rec(l)
+}
+
 for yield ##########################################
 
 val letters = List('A', 'B')
