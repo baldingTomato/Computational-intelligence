@@ -58,3 +58,11 @@ for i in range(len(optimal_nodes) - 1):
 
 
 plt.show()
+
+
+
+# Zwiększenie liczby mrówek (ant_count) poprawia jakość rozwiązania, ale wydłuża czas działania.
+# Wyższe wartości alpha zwiększają znaczenie feromonów, co może prowadzić do szybszej konwergencji.
+# Wyższe wartości beta zwiększają znaczenie odległości, co poprawia eksplorację na początku.
+# Zmniejszenie współczynnika wyparowania feromonów (pheromone_evaporation_rate) wydłuża czas działania.
+
