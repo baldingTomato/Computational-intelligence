@@ -567,3 +567,87 @@ def mainProg: Unit = {
 
   players.head ! Graj
 }
+
+
+################################################################# Czytanie txt
+
+
+import org.apache.pekko
+import pekko.actor._
+
+case class Init(liczbaPracownikow: Int)
+case class Zlecenie(tekst: List[String])
+case class Wykonaj(linia: String, id: Int)
+case class Wynik(id: Int, slowa: Set[String])
+
+class Pracownik extends Actor {
+  def receive: Receive = {
+    case Wykonaj(linia, id) =>
+      val uniqueWords = linia.split("\\W+").map(_.toLowerCase).filter(_.nonEmpty).toSet
+      sender() ! Wynik(id, uniqueWords)
+  }
+}
+
+class Nadzorca extends Actor {
+  def receive: Receive = {
+    case Init(liczbaPracownikow) =>
+      val pracownicy = (1 to liczbaPracownikow).map { i =>
+        context.actorOf(Props[Pracownik](), s"worker-$i")
+      }.toList
+      context.become(oczekujNaZlecenie(pracownicy))
+
+    case _ => println("Nadzorca musi zostac zainicjalizowany komunikatem Init.")
+  }
+
+  def oczekujNaZlecenie(pracownicy: List[ActorRef]): Receive = {
+    case Zlecenie(tekst) =>
+      val zgloszenia = tekst.zipWithIndex
+      pracownicy.zipWithIndex.foreach {
+        case (worker, idx) if idx < zgloszenia.length =>
+          val (linia, id) = zgloszenia(idx)
+          worker ! Wykonaj(linia, id)
+      }
+      context.become(przetwarzaj(pracownicy, tekst.drop(pracownicy.length), Set.empty, 0, tekst.size))
+  }
+
+  def przetwarzaj(
+      pracownicy: List[ActorRef],
+      pozostaleLinie: List[String],
+      globalSet: Set[String],
+      liczbaOdebranychWynikow: Int,
+      liczbaWszystkichLinii: Int
+  ): Receive = {
+    case Wynik(_, slowaZbior) =>
+      val nowyGlobalSet = globalSet ++ slowaZbior
+      val nowaLiczbaOdebranych = liczbaOdebranychWynikow + 1
+
+      if (pozostaleLinie.nonEmpty) {
+        val linia = pozostaleLinie.head
+        val pozostale = pozostaleLinie.tail
+        sender() ! Wykonaj(linia, nowaLiczbaOdebranych)
+        context.become(przetwarzaj(pracownicy, pozostale, nowyGlobalSet, nowaLiczbaOdebranych, liczbaWszystkichLinii))
+      } else if (nowaLiczbaOdebranych == liczbaWszystkichLinii) {
+        println(s"Przetwarzanie zakonczone: Łaczna liczba unikalnych slow: ${nowyGlobalSet.size}")
+        context.become(oczekujNaZlecenie(pracownicy))
+      } else {
+        context.become(przetwarzaj(pracownicy, pozostaleLinie, nowyGlobalSet, nowaLiczbaOdebranych, liczbaWszystkichLinii))
+      }
+  }
+}
+
+
+@main
+def zad2: Unit = {
+  def dane(): List[String] = {
+    scala.io.Source.fromResource("ogniem_i_mieczem.txt").getLines.toList
+  }
+
+  val system = ActorSystem("WordCounter")
+  val boss = system.actorOf(Props[Nadzorca](), "boss")
+
+  boss ! Init(liczbaPracownikow = 80)
+
+  val tekst = dane()
+  boss ! Zlecenie(tekst)
+}
+
