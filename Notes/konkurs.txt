@@ -1,0 +1,569 @@
+import org.apache.pekko
+import pekko.actor._
+import scala.concurrent.duration._
+import scala.util.Random
+
+object Nadzorca {
+  case class Init(n: Int)
+  case class Odpowiedzi(l: List[Int])
+}
+
+object Uczestnik {
+  case object Zacznij
+}
+
+class Nadzorca extends Actor {
+  def receive: Receive = {
+    case Nadzorca.Init(n) =>
+      val uczestnicy = (1 to n).map(id => context.actorOf(Props[Uczestnik](), f"uczestnik-$id")).toList
+      uczestnicy.foreach(_ ! Uczestnik.Zacznij)
+      context.become(oczekiwanie(uczestnicy, Map.empty))
+  }
+
+  def oczekiwanie(uczestnicy: List[ActorRef], odpowiedzi: Map[ActorRef, List[Int]]): Receive = {
+    case Nadzorca.Odpowiedzi(l) =>
+      val nowaMapa = odpowiedzi + (sender() -> l)
+
+      if (nowaMapa.size == uczestnicy.size) {
+        val maxPunkty = nowaMapa.values.map(_.sum).max
+        val najlepsi = nowaMapa.filter { case (_, lista) => lista.sum == maxPunkty }.keys.toList
+
+        val pozostali = uczestnicy.diff(najlepsi)
+        pozostali.foreach(_ ! PoisonPill)
+
+        if (najlepsi.size == 1) {
+          val zwyciezca = najlepsi.head
+          println(s"Zwyciezca jest ${zwyciezca.path.name} z wynikiem $maxPunkty!")
+          context.system.terminate()
+        } else {
+          println(s"Remis wsrod ${najlepsi.map(_.path.name).mkString(", ")}. Powtarzamy konkurs.")
+          najlepsi.foreach(_ ! Uczestnik.Zacznij)
+          context.become(oczekiwanie(najlepsi, Map.empty))
+        }
+      } else {
+        context.become(oczekiwanie(uczestnicy, nowaMapa))
+      }
+  }
+}
+
+class Uczestnik extends Actor {
+  def receive: Receive = {
+    case Uczestnik.Zacznij => {
+      val losowe = (1 to 10 map (_ => scala.util.Random.nextInt(5))).toList
+      sender() ! Nadzorca.Odpowiedzi(losowe)
+    }
+  }
+}
+
+@main
+def zad1: Unit = {
+  val system = ActorSystem("Konkurs")
+
+  val boss = system.actorOf(Props[Nadzorca](), "boss")
+
+  boss ! Nadzorca.Init(5)
+}
+
+
+
+#########################################  Zamek:
+
+import org.apache.pekko
+import pekko.actor._
+import scala.concurrent.duration._
+import scala.util.Random
+
+object SilaWyzsza {
+  case class Bitwa(zamek1: ActorRef, zamek2: ActorRef)
+}
+
+object Obronca {
+  case class Strzelaj(atakowanyZamek: ActorRef)
+  case class OtrzymajStrzal(liczbaObroncow: Int, zamek: String)
+}
+
+object Zamek {
+  case class Walka(przeciwnik: ActorRef)
+  case object NadchodzacyOstrzal
+}
+
+class SilaWyzsza extends Actor {
+  def receive: Receive = {
+    case SilaWyzsza.Bitwa(zamek1, zamek2) => {
+      zamek1 ! Zamek.Walka(zamek2)
+      zamek2 ! Zamek.Walka(zamek1)
+    }
+  }
+}
+
+class Zamek extends Actor {
+  val obroncy = (1 to 100).map { id =>
+    val obronca = context.actorOf(Props[Obronca](), f"obronca-${id}")
+    context.watch(obronca)
+  }.toList
+
+  def receive: Receive = fight(obroncy)
+
+  def fight(obroncy: List[ActorRef]): Receive = {
+    case Zamek.Walka(przeciwnik) => {
+      obroncy.foreach(_ ! Obronca.Strzelaj(przeciwnik))
+    }
+
+    case Zamek.NadchodzacyOstrzal => {
+      val boguDuchaWinnyCzlowiekKtoryNikomuNicNieZrobilACierpiZupelnieTakJakJa = obroncy(scala.util.Random.nextInt(obroncy.length))
+      boguDuchaWinnyCzlowiekKtoryNikomuNicNieZrobilACierpiZupelnieTakJakJa ! Obronca.OtrzymajStrzal(obroncy.size, self.path.name)
+    }
+
+    case Terminated(obronca: ActorRef) =>
+      val nowaStalaKtoraTakNaprawdeJestZmienna = obroncy.filter(_ != obronca)
+      if (nowaStalaKtoraTakNaprawdeJestZmienna.isEmpty) {
+        println("Koniec bitwy! Silniejszy wygral, jak zwykle!")
+        context.system.terminate()
+      }else{
+        context.become(fight(nowaStalaKtoraTakNaprawdeJestZmienna))
+      }
+  }
+}
+
+class Obronca extends Actor {
+  def receive: Receive = {
+    case Obronca.Strzelaj(przeciwnik) => {
+      przeciwnik ! Zamek.NadchodzacyOstrzal
+    }
+
+    case Obronca.OtrzymajStrzal(obroncy, zamek) => {
+      val szansa = obroncy / 200.0
+      if (Random.nextDouble() < szansa) {
+        println(s"Umiera obronca $zamek")
+        context.stop(self)
+      }
+    }
+  }
+}
+
+@main
+def zad1: Unit = {
+  val system = ActorSystem("Bitwa")
+
+  val zamek1 = system.actorOf(Props[Zamek](), "zamek-1")
+  val zamek2 = system.actorOf(Props[Zamek](), "zamek-2")
+
+  import system.dispatcher
+  val silaWyzsza = system.actorOf(Props[SilaWyzsza](), "SilaWyzsza")
+
+  val ticker = system.scheduler.scheduleWithFixedDelay(
+    Duration.Zero,
+    1000.milliseconds,
+    silaWyzsza,
+    SilaWyzsza.Bitwa(zamek1, zamek2)
+  )
+
+}
+
+
+
+####################################################################### Płkarze
+
+
+import org.apache.pekko
+import pekko.actor.*
+
+case class Zacznij(lPilkarzy: Int, lGoli: Int)
+case class Pozostali(pilkarze: List[ActorRef])
+case class Pilka(trener : ActorRef)
+case class Strzal(pilkarz: ActorRef, czyGol: Boolean)
+
+class Trener extends Actor {
+  def receive: Receive = {
+    case Zacznij(lPilkarzy, lGoli) => {
+      println(s"Przygotowanie do meczu dla $lPilkarzy pilkarzy do $lGoli goli")
+      val druzyna1 = (0 until lPilkarzy/2).map(e=> context.actorOf(Props[Pilkarz](), f"pilkarz${e*2}")).toList
+      val druzyna2 = (0 until lPilkarzy/2).map(e=> context.actorOf(Props[Pilkarz](), f"pilkarz${e*2+1}")).toList
+      val pilkarze = druzyna1.appendedAll(druzyna2)
+      pilkarze.foreach {
+        case(pilkarz) => {
+          val pozostali = pilkarze.filterNot(_ == pilkarz)
+          pilkarz ! Pozostali(pozostali)
+        }
+      }
+      context.become(start(pilkarze,druzyna1, druzyna2, 0,0, lGoli))
+      val los = scala.util.Random.nextInt(lPilkarzy)
+      pilkarze(los) ! Pilka(self)
+
+    }
+  }
+
+  def start(pilkarze: List[ActorRef], druzyna1: List[ActorRef], druzyna2: List[ActorRef],gole1 : Int, gole2: Int, maxGoli: Int): Receive = {
+    case Strzal(pilkarz, czyGol) => {
+      println("Padl Strzal")
+      if (czyGol) {
+        println(s"${pilkarz.path.name}: Gool")
+        if (druzyna1.contains(pilkarz)) {
+          val druzyna1Gole = gole1 + 1
+          if (druzyna1Gole == maxGoli) {
+            println(s"Wygrala druzyna 1 $druzyna1Gole : $gole2")
+            println("Sklad druzyny 1:")
+            druzyna1.foreach(println)
+            context.system.terminate()
+          } else {
+            val los = scala.util.Random.nextInt(pilkarze.size)
+            pilkarze(los) ! Pilka(self)
+            context.become(start(pilkarze, druzyna1, druzyna2, druzyna1Gole, gole2, maxGoli))
+          }
+        } else {
+          val druzyna2Gole = gole1 + 1
+          if (druzyna2Gole == maxGoli) {
+            println(s"Wygrala druzyna 2 $gole1 : $druzyna2Gole")
+            println("Sklad druzyny 2:")
+            druzyna2.foreach(println)
+            context.system.terminate()
+          } else {
+            val los = scala.util.Random.nextInt(pilkarze.size)
+            pilkarze(los) ! Pilka(self)
+            context.become(start(pilkarze, druzyna1, druzyna2, gole1, druzyna2Gole, maxGoli))
+          }
+        }
+      } else {
+        println(s"${pilkarz.path.name}: Pudlo")
+        val los = scala.util.Random.nextInt(pilkarze.size)
+        context.become(start(pilkarze, druzyna1, druzyna2, gole1, gole2, maxGoli))
+        pilkarze(los) ! Pilka(self)
+
+      }
+    }
+  }
+}
+
+class Pilkarz extends Actor {
+  def receive: Receive = {
+    case Pozostali(pozostali) => {
+      context.become(gra(pozostali))
+    }
+
+  }
+
+  def gra(pozostali : List[ActorRef]): Receive = {
+    case Pilka(trener) => {
+      val los1 = scala.util.Random.nextBoolean()
+      println(s"${self.path.name}: Dostalem pilke")
+      if(los1) {
+        val los = scala.util.Random.nextInt(pozostali.size)
+        println(s"${self.path.name}: Podaje do ${pozostali(los).path.name}")
+        pozostali(los) ! Pilka(trener)
+      } else if (!los1) {
+        println(s"${self.path.name}: Strzelam")
+        val czyGol = scala.util.Random.nextBoolean()
+        trener ! Strzal(self, czyGol)
+      }
+
+    }
+  }
+}
+
+@main
+def zad1: Unit = {
+  val system = ActorSystem("Zadanie1")
+  val trener1 = system.actorOf(Props[Trener](), "trener1")
+  trener1 ! Zacznij (10, 3)
+
+}
+
+
+######################################################################### Zawody utypowione
+
+import org.apache.pekko.actor.typed.*
+import org.apache.pekko.actor.typed.scaladsl.Behaviors
+import scala.util.Random
+import org.apache.pekko.actor.typed.delivery.ConsumerController.Start
+
+val maxScore = 2
+val liczbaZawodnikow = 50
+val liczbaFinalistow = 20
+
+trait Org
+case object StopOrg extends Org
+case object StartOrg extends Org
+case class WynikOrg(zawodnik: ActorRef[Zaw], wyn: (Int, Int, Int)) extends Org
+
+object Organizator {
+  def apply(): Behavior[Org] = Behaviors.setup { context =>
+    val zawodnicy = for (i <- (1 to liczbaZawodnikow)) yield context.spawn(Zawodnik(), s"zawodnik$i")
+    val rundaEliminacji = context.spawn(Runda(), "RundaEliminacyjna")
+    Behaviors.receiveMessage[Org] {
+      case StartOrg => {
+        rundaEliminacji ! StartRun(context.self, zawodnicy.toList)
+        eliminacje(List(), rundaEliminacji)
+      }
+    }
+
+  }
+  def eliminacje(wyniki: List[(ActorRef[Zaw],(Int,Int,Int))], runda: ActorRef[Run]): Behavior[Org] = Behaviors.setup[Org] { context =>
+    Behaviors.receiveMessage[Org] {
+      case WynikOrg(zawodnik, wyn) => {
+        val newWyniki = (zawodnik, wyn) +: wyniki
+        if(newWyniki.size == liczbaZawodnikow) {
+          val posortowane = newWyniki.sortBy{(_, wyn) =>
+            wyn._1+ wyn._2+wyn._3
+          }.reverse
+          context.log.info("Wyniki po eliminacjach")
+          posortowane.foreach(wynik => {
+            context.log.info(s"\t${wynik._1.path.name} uzyskal wynik: ${wynik._2}")
+          })
+          runda ! StopRun
+          val finalisci = posortowane.map((zaw, _) => zaw).take(liczbaFinalistow)
+          val rundaFinalowa = context.spawn(Runda(), "RundaFinalowa")
+          rundaFinalowa ! StartRun(context.self, finalisci)
+          finały(posortowane.take(liczbaFinalistow), finalisci, rundaFinalowa)
+        }
+        else {
+          eliminacje(newWyniki, runda)
+        }
+      }
+    }
+  }
+
+  def finały(wyniki: List[(ActorRef[Zaw],(Int,Int,Int))],
+             finalisci: List[ActorRef[Zaw]],
+             runda: ActorRef[Run]
+            ): Behavior[Org] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Org] {
+      case WynikOrg(zawodnik, wyn) => {
+        val newWyniki = (zawodnik, wyn) +: wyniki
+        if(newWyniki.size == liczbaFinalistow*2) {
+
+
+          // zsumowanie poszczegolnych not wyniku v1,v2,v3
+          val dodane = newWyniki.foldLeft(Map[ActorRef[Zaw],(Int,Int,Int)]()){ (agg, wyn) =>
+            val (zawodnik, (v1, v2, v3)) = wyn
+            val currentValue = agg.getOrElse(zawodnik, (0,0,0))
+            val sum = (currentValue._1+v1, currentValue._2+v2, currentValue._3+v3)
+            agg + (zawodnik -> sum) // dodanie do mapy nowego, zsumowanego wyniku
+          }
+          val podsumowane = dodane.toList
+          val posortowane = podsumowane.sortBy{(_, wyn) =>
+            wyn._1+wyn._2+wyn._3 // sortowanie wg sumy not
+          }.reverse
+
+          context.log.info("Wyniki po finalach")
+          posortowane.foreach(wynik => {
+            context.log.info(s"\t${wynik._1.path.name} uzyskal wynik: ${wynik._2}")
+          })
+          runda ! StopRun
+          podsumowanie(podsumowane.reverse)
+
+
+        }
+        else {
+          finały(newWyniki, finalisci, runda)
+        }
+      }
+    }
+  }
+
+  def podsumowanie(ls: List[(ActorRef[Zaw],(Int,Int,Int))]): Behavior[Org] = Behaviors.setup { context =>
+    context.log.info("Podsumowanie")
+
+    // ls: List[(ActorRef[Zaw],(Int,Int,Int))]
+    val posortowane = ls.sortBy{ case (_,(a,b,c)) => {
+      (a+b+c, a,b,c) // sortuje wg sumy a potem po kolejnych wartościach (int,int,int)
+    }}.reverse
+
+    posortowane.foldLeft((1, (0,0,0)))((agg, wyn) =>
+      val (miejsce, (agg1,agg2,agg3)) = agg   // miejsce i punkty poprzedniego zawodnika
+      val (zaw, (a,b,c)) = wyn // zawodnik i jego punkty
+      if(a+b+c == agg1+agg2+agg3 && a==agg1 && b==agg2 && c==agg3){ // jeżeli punkty obecnego zawodnika i kolejne noty są takie same
+        context.log.info(s"\t${miejsce-1}. ${zaw.path.name} - ${a}-${b}-${c} = ${a+b+c}") // to zajmują to samo miejsce
+        (miejsce, (a,b,c))  // miejsce zostaje to samo i punkty obecnego zawodnika idą dalej
+      }
+      else {
+        context.log.info(s"\t${miejsce}. ${zaw.path.name} - ${a}-${b}-${c} = ${a+b+c}") // jeżeli punkty nie są takie same
+        (miejsce+1, (a,b,c)) // to miejsce+1
+      }
+    )
+    Behaviors.stopped
+  }
+}
+
+trait Run
+case object StopRun extends Run
+case class StartRun(sender: ActorRef[Org], zawodnicy: List[ActorRef[Zaw]]) extends Run
+case class WynikProby(sender: ActorRef[Zaw], wynikProby: (Int,Int,Int)) extends Run
+
+object Runda {
+  def apply(): Behavior[Run] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Run] {
+      case StopRun => {
+        Behaviors.stopped
+      }
+      case StartRun(organizator, zawodnicy) => {
+        zawodnicy.foreach{ zaw =>
+          zaw ! Proba(context.self)
+        }
+        posrednikWynikow(organizator)
+      }
+    }
+  }
+
+  def posrednikWynikow(organizator: ActorRef[Org]) = Behaviors.setup[Run]{ context =>
+    Behaviors.receiveMessage[Run] {
+      case StopRun => {
+        Behaviors.stopped
+      }
+      case WynikProby(sender, wynikProby) => {
+        organizator ! WynikOrg(sender, wynikProby)
+        Behaviors.same
+      }
+    }
+
+  }
+}
+
+trait Zaw
+case object StopZaw extends Zaw
+case class Proba(sender: ActorRef[Run]) extends Zaw
+
+object Zawodnik {
+  def apply(): Behavior[Zaw] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Zaw] {
+      case StopZaw => {
+        Behaviors.same
+      }
+      case Proba(sender) => {
+        val random = new Random()
+        val wynik = (
+          random.nextInt(maxScore+1),
+          random.nextInt(maxScore+1),
+          random.nextInt(maxScore+1)
+        )
+        sender ! WynikProby(context.self, wynik)
+        Behaviors.same
+      }
+    }
+  }
+}
+
+@main
+def prog: Unit = {
+  val org: ActorSystem[Org] = ActorSystem(Organizator(), "organizator")
+  org ! StartOrg
+}
+
+
+############################################################################# typowe bułki
+
+
+import org.apache.pekko.actor.typed.*
+import org.apache.pekko.actor.typed.scaladsl.Behaviors
+import scala.util.Random
+import org.apache.pekko.actor.typed.delivery.ConsumerController.Start
+
+trait Human
+case class KupBulki(n: Int) extends Human
+case class Bulki(aktor: ActorRef[Shop], n: Int) extends Human
+
+
+object Klient {
+  def apply(): Behavior[Human] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Human] {
+      case KupBulki(doKupienia) => {
+        val piekarnia = context.spawn(Sklep(), "sklep1")
+        piekarnia ! Zamowienie(context.self, doKupienia)
+        oczekiwanie(doKupienia, 1)
+      }
+    }
+  }
+
+  def oczekiwanie(potrzeba: Int, liczbaPrób: Int): Behavior[Human] = Behaviors.setup[Human] { context =>
+    Behaviors.receiveMessage[Human] {
+      case Bulki(sklep, zakupione) => {
+        if(zakupione < potrzeba){
+          if(liczbaPrób == 10){
+            context.log.info("Nie udalo mi sie kupic wystarczajacej liczby bulek po 10 probach.")
+            context.system.terminate()
+            Behaviors.stopped           
+          }else{
+            sklep ! StopSklep
+            val numer = liczbaPrób+1
+            val nowaPiekarnia = context.spawn(Sklep(), s"sklep$numer")
+            nowaPiekarnia ! Zamowienie(context.self, potrzeba - zakupione)
+            oczekiwanie(potrzeba - zakupione, liczbaPrób + 1)
+          }
+        } else {
+          context.log.info(s"Udalo mi sie kupic wystarczajaca liczbe bulek w $liczbaPrób prob.")
+          context.system.terminate()
+          Behaviors.stopped         
+        }
+      }
+    }
+  }
+}
+
+trait Shop
+case class Zamowienie(aktor: ActorRef[Human], n: Int) extends Shop
+case object StopSklep extends Shop
+
+object Sklep {
+  def apply(): Behavior[Shop] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Shop] {
+      case StopSklep => {
+        Behaviors.stopped
+      }
+      case Zamowienie(klient, liczbaBulekDoSprzedazy) => {
+        val los = scala.util.Random.nextInt(6)
+        klient ! Bulki(context.self, los)
+        Behaviors.same
+      }
+    }
+  }
+}
+
+@main
+def prog: Unit = {
+  val k: ActorSystem[Human] = ActorSystem(Klient(), "klient")
+  k ! KupBulki(37)
+}
+
+
+################################################################ PingPong
+
+
+import org.apache.pekko
+import pekko.actor.*
+
+case object Pilka
+case object Graj
+case class Kolejny(player: ActorRef)
+
+class Player extends Actor with ActorLogging {
+  def receive: Receive = {
+    case Kolejny(player) =>
+      context.become(connectWith(player))
+  }
+
+  def connectWith(player: ActorRef): Receive = {
+    case Graj =>
+      player ! Pilka
+    case Pilka =>
+      player ! Pilka
+      log.info(s"Gram do: ${self.path.name}")
+  }
+}
+
+@main
+def mainProg: Unit = {
+
+  val system = ActorSystem("PingPong")
+
+  def createPlayers(l: List[String]): List[ActorRef] = {
+    l.map(name => system.actorOf(Props[Player](), name))
+  }
+
+  val players = createPlayers(List("tomek", "piotr", "filip", "darek", "radek"))
+
+  players.zipWithIndex.foreach { case (actor, idx) =>
+    val nextActor = players((idx + 1) % players.length)
+    actor ! Kolejny(nextActor)
+  }
+
+  players.head ! Graj
+}
