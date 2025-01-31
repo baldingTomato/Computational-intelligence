@@ -651,3 +651,75 @@ def zad2: Unit = {
   boss ! Zlecenie(tekst)
 }
 
+
+########################################################################################################################
+
+import org.apache.pekko.actor.typed.*
+import org.apache.pekko.actor.typed.scaladsl.Behaviors
+import scala.util.Random
+import org.apache.pekko.actor.typed.delivery.ConsumerController.Start
+
+trait Counter
+case class Wynik(freq: Int, gen: ActorRef[Gen]) extends Counter
+case class Utworz(liczbaG: Int) extends Counter
+
+object Nadzorca {
+  def apply(): Behavior[Counter] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Counter] {
+      case Utworz(liczbaG) => {
+        val generatory = for (i <- (1 to liczbaG)) 
+        yield context.spawn(Generator(), s"generator-$i")
+        generatory.foreach( g => g ! Generuj(context.self))
+        oczekiwanie(generatory.toList, Map.empty)
+      }
+    }
+
+  }
+  def oczekiwanie(generatory: List[ActorRef[Gen]], ready: Map[ActorRef[Gen], Int]): Behavior[Counter] = Behaviors.setup[Counter] { context =>
+    Behaviors.receiveMessage[Counter] {
+      case Wynik(freq, g) => {
+        val newReady = ready + (g -> freq)
+
+        if(newReady.size == generatory.size){
+            val sorted = newReady.toSeq.sortBy(_._2).toMap
+            val highest = sorted.head._2
+            context.log.info(s"\n\nNajwiekszy wylosowany podciag to: $highest\n\n") 
+            context.log.info("Taki wynik uzyskali:\n") 
+
+            sorted.foreach( (g, v) => if(v == highest) context.log.info(s"$g"))
+            Behaviors.stopped
+        } else {
+            oczekiwanie(generatory, newReady)
+        }
+      }
+    }
+  }
+}
+
+trait Gen
+case class Generuj(parent: ActorRef[Counter]) extends Gen
+
+object Generator {
+  def apply(): Behavior[Gen] = Behaviors.setup { context =>
+    Behaviors.receiveMessage[Gen] {
+      case Generuj(parent) => {
+        val len = Random.between(10, 100)
+        val randomList = List.fill(len)(Random.nextInt(2))
+
+        val freq = randomList.foldLeft((0, -1)) { case ((count, prev), current) =>
+            if (current != prev) (count + 1, current) else (count, prev)
+        }
+
+        parent ! Wynik(freq._1, context.self)
+        Behaviors.same
+      }
+    }
+  }
+}
+
+
+@main
+def prog: Unit = {
+  val org: ActorSystem[Counter] = ActorSystem(Nadzorca(), "Nadzorca")
+  org ! Utworz(10)
+}
